@@ -1,5 +1,13 @@
 #include "Module.hpp"
 
+struct CodeViewInfo
+{
+	char CVSignature[4];
+	GUID Guid;
+	DWORD Age;
+	char PdbFilePath[];
+};
+
 namespace NewBase
 {
 	Module::Module(LDR_DATA_TABLE_ENTRY* dllEntry) :
@@ -45,6 +53,14 @@ namespace NewBase
 			}
 		}
 		return nullptr;
+	}
+
+	char* Module::GetPdbFilePath()
+	{
+		auto entry           = GetNtHeader()->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+		auto debug_directory = m_Base.Add(entry.VirtualAddress).As<IMAGE_DEBUG_DIRECTORY*>();
+		auto codeview        = m_Base.Add(debug_directory->AddressOfRawData).As<CodeViewInfo*>();
+		return codeview->PdbFilePath;
 	}
 
 	bool Module::Valid() const

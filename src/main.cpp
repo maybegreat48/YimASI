@@ -1,39 +1,33 @@
+#include "AsiLoader.hpp"
+#include "Hijack.hpp"
 #include "common.hpp"
 #include "filemgr/FileMgr.hpp"
-#include "frontend/GUI.hpp"
 #include "hooking/Hooking.hpp"
+#include "memory/ModuleMgr.hpp"
 #include "pointers/Pointers.hpp"
-#include "renderer/Renderer.hpp"
 
 namespace NewBase
 {
-	DWORD Main(void*)
+	void Main()
 	{
-		const auto documents = std::filesystem::path(std::getenv("USERPROFILE")) / "Documents"; 
-		FileMgr::Init(documents / "HellBase");
+		std::filesystem::path base_dir = std::getenv("appdata");
+		base_dir /= "YimMenu";
+		FileMgr::Init(base_dir);
 
-		LogHelper::Init("henlo", FileMgr::GetProjectFile("./cout.log").Path());
+		LogHelper::Init("", FileMgr::GetProjectFile("./yimasi.log").Path(), false);
 
-		if (!Pointers.Init())
-			goto unload;
-		Renderer::Init();
-		GUI::Init();
-		Hooking::Init();
-
-		while (g_Running)
+		try
 		{
-			std::this_thread::sleep_for(100ms);
+			if (Pointers.Init())
+			{
+				Hooking::Init();
+				AsiLoader::Init();
+			}
 		}
-
-	unload:
-		Hooking::Destroy();
-		Renderer::Destroy();
-		LogHelper::Destroy();
-
-		CloseHandle(g_MainThread);
-		FreeLibraryAndExitThread(g_DllInstance, EXIT_SUCCESS);
-
-		return EXIT_SUCCESS;
+		catch (const std::exception& e)
+		{
+			LOG(FATAL) << e.what();
+		}
 	}
 }
 
@@ -45,9 +39,10 @@ BOOL WINAPI DllMain(HINSTANCE dllInstance, DWORD reason, void*)
 
 	if (reason == DLL_PROCESS_ATTACH)
 	{
-		g_DllInstance = dllInstance;
+		ModuleMgr::Init();
+		Hijack::Init(&Main);
 
-		g_MainThread = CreateThread(nullptr, 0, Main, nullptr, 0, &g_MainThreadId);
+		g_DllInstance = dllInstance;
 	}
 	return true;
 }

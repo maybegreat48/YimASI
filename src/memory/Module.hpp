@@ -34,6 +34,13 @@ namespace NewBase
 		 */
 		void** GetImport(const std::string_view moduleName, const std::string_view symbolName) const;
 
+		/**
+		* @brief Gets the PDB file path. This should not work with anything that isn't GTA5.exe, use with caution
+		* 
+		* @return The PDB file path
+		*/
+		char* GetPdbFilePath();
+
 		bool Valid() const;
 
 	private:

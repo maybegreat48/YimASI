@@ -41,7 +41,11 @@ namespace NewBase
 	template<typename T>
 	inline bool IATHook<T>::Enable()
 	{
+		DWORD old_protect;
+
+		VirtualProtect(m_HookLocation, sizeof(m_HookLocation), PAGE_EXECUTE_READWRITE, &old_protect); // we load before Arxan does that
 		*m_HookLocation = m_HookFunc;
+		VirtualProtect(m_HookLocation, sizeof(m_HookLocation), old_protect, nullptr); // restore old page protection to avoid tripping Arxan when it finally loads
 		return true;
 	}
 

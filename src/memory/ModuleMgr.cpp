@@ -4,12 +4,12 @@
 
 namespace NewBase
 {
-	Module* ModuleMgr::Get(const std::string_view name)
+	Module* ModuleMgr::GetImpl(const std::string_view name)
 	{
 		return Get(Joaat(name));
 	}
 
-	Module* ModuleMgr::Get(joaat_t hash)
+	Module* ModuleMgr::GetImpl(joaat_t hash)
 	{
 		if (const auto& it = m_CachedModules.find(hash); it != m_CachedModules.end())
 		{
@@ -18,7 +18,7 @@ namespace NewBase
 		return nullptr;
 	}
 
-	bool ModuleMgr::LoadModules()
+	bool ModuleMgr::InitImpl()
 	{
 		const auto peb = reinterpret_cast<PPEB>(NtCurrentTeb()->ProcessEnvironmentBlock);
 		if (!peb)
@@ -40,7 +40,7 @@ namespace NewBase
 			{
 				auto module = std::make_unique<Module>(tableEntry);
 
-				m_CachedModules.insert({Joaat(module->Name()), std::move(module)});
+				m_CachedModules.emplace(Joaat(module->Name()), std::move(module));
 			}
 		}
 

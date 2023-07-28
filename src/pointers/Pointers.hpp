@@ -6,14 +6,12 @@ namespace NewBase
 {
 	struct PointerData
 	{
-		IDXGISwapChain** SwapChain;
-		HWND Hwnd;
-		WNDPROC WndProc;
 	};
 
 	struct Pointers : PointerData
 	{
 		bool Init();
+		bool InitScriptHook();
 	};
 
 	inline NewBase::Pointers Pointers;
