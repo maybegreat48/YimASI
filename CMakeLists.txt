@@ -5,6 +5,7 @@ project(WTSAPI32 VERSION 1001.0.0 DESCRIPTION "YimMenu ASI Loader")
 # libs
 include(cmake/async-logger.cmake)
 include(cmake/minhook.cmake)
+include(cmake/gtav-classes.cmake)
 
 # source
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/src")
@@ -23,6 +24,7 @@ message(STATUS "Setting up include directories.")
 target_include_directories(${PROJECT_NAME} PRIVATE
     "${SRC_DIR}"
     "${minhook_SOURCE_DIR}/include"    
+    "${gtav_classes_SOURCE_DIR}"
 )
 
 message(STATUS "Setting up linked libraries")

@@ -10,6 +10,9 @@ namespace NewBase
 {
 	Hooking::Hooking()
 	{
+		BaseHook::Add<Anticheat::QueueDependency>(new DetourHook("QueueDependency", Pointers.m_QueueDependency, Anticheat::QueueDependency));
+		BaseHook::Add<Allocator::SMPACreateStub>(new DetourHook("SMPACreateStub", Pointers.m_SMPACreateStub, Allocator::SMPACreateStub));
+		BaseHook::Add<GameFiles::ReadGameConfig>(new DetourHook("ReadGameConfig", Pointers.m_ReadGameConfig, GameFiles::ReadGameConfig));
 	}
 
 	Hooking::~Hooking()

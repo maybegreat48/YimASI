@@ -1,8 +1,10 @@
 #pragma once
+// clang-format off
+#include <Windows.h>
+#undef max
 
 #include <AsyncLogger/Logger.hpp>
 #include <MinHook.h>
-#include <Windows.h>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -28,3 +30,5 @@ namespace NewBase
 
 	extern HINSTANCE g_DllInstance;
 }
+
+// clang-format on

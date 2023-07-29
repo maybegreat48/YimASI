@@ -13,6 +13,26 @@ namespace NewBase
 
 		strcpy(ModuleMgr::Get("GTA5.exe"_J)->GetPdbFilePath(), (std::filesystem::current_path() / "GTA5.pdb").string().c_str());
 
+		constexpr auto queueDependency = Pattern<"E8 ? ? ? ? B8 A0 00 00 00">("QueueDependency");
+		scanner.Add(queueDependency, [this](PointerCalculator ptr) {
+			m_QueueDependency = ptr.Add(1).Rip().As<PVOID>();
+		});
+
+		constexpr auto initMemAllocator = Pattern<"83 C8 01 48 8D 0D ? ? ? ? 41 B1 01 45 33 C0">("InitMemAllocator");
+		scanner.Add(initMemAllocator, [this](PointerCalculator ptr) {
+			*ptr.Add(17).As<uint32_t*>() = 650 * 1024 * 1024;
+		});
+
+		constexpr auto SMPACreateStub = Pattern<"49 63 F0 48 8B EA B9 07 00 00 00">("SMPACreateStub");
+		scanner.Add(SMPACreateStub, [this](PointerCalculator ptr) {
+			m_SMPACreateStub = ptr.Sub(0x29).As<PVOID>();
+		});
+
+		constexpr auto readGameConfig = Pattern<"48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 30 48 8B F9">("ReadGameConfig");
+		scanner.Add(readGameConfig, [this](PointerCalculator ptr) {
+			m_ReadGameConfig = ptr.As<PVOID>();
+		});
+
 		if (!scanner.Scan())
 		{
 			LOG(FATAL) << "Some patterns could not be found, unloading.";

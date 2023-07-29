@@ -6,6 +6,9 @@ namespace NewBase
 {
 	struct PointerData
 	{
+		PVOID m_QueueDependency;
+		PVOID m_SMPACreateStub;
+		PVOID m_ReadGameConfig;
 	};
 
 	struct Pointers : PointerData
