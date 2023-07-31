@@ -38,7 +38,7 @@ namespace NewBase
 	    m_DetourFunc(detour),
 	    m_OriginalFunc(nullptr)
 	{
-		OptimizeHook();
+		// OptimizeHook();
 
 		if (const auto result = MH_CreateHook(m_TargetFunc, m_DetourFunc, &m_OriginalFunc); result != MH_OK)
 		{
