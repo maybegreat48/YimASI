@@ -18,4 +18,11 @@ namespace NewBase
 	{
 		extern rage::fwConfigManagerImpl<CGameConfig>* ReadGameConfig(rage::fwConfigManagerImpl<CGameConfig>* manager, const char* file);
 	}
+
+	namespace Pools
+	{
+		extern unsigned int GetPoolSize(rage::fwConfigManagerImpl<CGameConfig>* mgr, uint32_t hash, int defaultValue);
+		extern void* CreatePool(void* pool, int size, const char* name, int unk1, int unk2, bool unk3);
+		extern void* GetPoolItem(void* pool);
+	}
 }

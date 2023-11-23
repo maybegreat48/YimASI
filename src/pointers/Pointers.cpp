@@ -33,6 +33,21 @@ namespace NewBase
 			m_ReadGameConfig = ptr.As<PVOID>();
 		});
 
+		constexpr auto getPoolSize = Pattern<"45 33 DB 44 8B D2 66 44 39 59 10 74 4B">("GetPoolSize");
+		scanner.Add(getPoolSize, [this](PointerCalculator ptr) {
+			m_GetPoolSize = ptr.As<PVOID>();
+		});
+
+		constexpr auto createPool = Pattern<"40 53 48 83 EC 20 8B 44 24 50 48 83">("CreatePool");
+		scanner.Add(createPool, [this](PointerCalculator ptr) {
+			m_CreatePool = ptr.As<PVOID>();
+		});
+
+		constexpr auto getPoolItem = Pattern<"4C 8B D1 48 63 49 18">("GetPoolItem");
+		scanner.Add(getPoolItem, [this](PointerCalculator ptr) {
+			m_GetPoolItem = ptr.As<PVOID>();
+		});
+
 		if (!scanner.Scan())
 		{
 			LOG(FATAL) << "Some patterns could not be found, unloading.";

@@ -9,6 +9,9 @@ namespace NewBase
 		PVOID m_QueueDependency;
 		PVOID m_SMPACreateStub;
 		PVOID m_ReadGameConfig;
+		PVOID m_GetPoolSize;
+		PVOID m_CreatePool;
+		PVOID m_GetPoolItem;
 	};
 
 	struct Pointers : PointerData

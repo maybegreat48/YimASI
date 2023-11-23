@@ -29,6 +29,9 @@ namespace NewBase
 	using namespace std::chrono_literals;
 
 	extern HINSTANCE g_DllInstance;
+	
+	extern uint32_t g_LastPoolHash;
+	extern std::unordered_map<void*, uint32_t> g_Pools;
 }
 
 // clang-format on
