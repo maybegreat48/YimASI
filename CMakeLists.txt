@@ -6,6 +6,7 @@ project(WTSAPI32 VERSION 1001.0.0 DESCRIPTION "YimMenu ASI Loader")
 include(cmake/async-logger.cmake)
 include(cmake/minhook.cmake)
 include(cmake/gtav-classes.cmake)
+include(cmake/asmjit.cmake)
 
 # source
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/src")
@@ -25,10 +26,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${SRC_DIR}"
     "${minhook_SOURCE_DIR}/include"    
     "${gtav_classes_SOURCE_DIR}"
+    "${asmjit_SOURCE_DIR}/src/asmjit"  
 )
 
 message(STATUS "Setting up linked libraries")
-target_link_libraries(${PROJECT_NAME} PRIVATE AsyncLogger minhook)
+target_link_libraries(${PROJECT_NAME} PRIVATE AsyncLogger minhook AsmJit::AsmJit)
 
 if (MSVC)
     add_compile_options(/W4 /WX)

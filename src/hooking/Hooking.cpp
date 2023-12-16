@@ -16,6 +16,10 @@ namespace NewBase
 		BaseHook::Add<Pools::GetPoolSize>(new DetourHook("GetPoolSize", Pointers.m_GetPoolSize, Pools::GetPoolSize));
 		BaseHook::Add<Pools::CreatePool>(new DetourHook("CreatePool", Pointers.m_CreatePool, Pools::CreatePool));
 		BaseHook::Add<Pools::GetPoolItem>(new DetourHook("GetPoolItem", Pointers.m_GetPoolItem, Pools::GetPoolItem));
+		BaseHook::Add<Script::OnProgramLoad>(new DetourHook("OnProgramLoad", Pointers.m_OnProgramLoad, Script::OnProgramLoad));
+		BaseHook::Add<Script::ResetThread>(new DetourHook("ResetThread", Pointers.m_ResetThread, Script::ResetThread));
+		BaseHook::Add<Script::KillThread>(new DetourHook("KillThread", Pointers.m_KillThread, Script::KillThread));
+		BaseHook::Add<Script::ScriptVM>(new DetourHook("ScriptVM", Pointers.m_ScriptVM, Script::ScriptVM));
 	}
 
 	Hooking::~Hooking()

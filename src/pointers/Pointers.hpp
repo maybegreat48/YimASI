@@ -2,16 +2,32 @@
 #include <d3d11.h>
 #include <windows.h>
 
+namespace rage
+{
+	class scrNativeHandler;
+}
+
 namespace NewBase
 {
+	using GetNativeHandler = rage::scrNativeHandler*(*)(void* table, std::uint64_t hash);
+
 	struct PointerData
 	{
 		PVOID m_QueueDependency;
+
 		PVOID m_SMPACreateStub;
+
 		PVOID m_ReadGameConfig;
 		PVOID m_GetPoolSize;
 		PVOID m_CreatePool;
 		PVOID m_GetPoolItem;
+
+		PVOID m_OnProgramLoad;
+		PVOID m_ResetThread;
+		PVOID m_KillThread;
+		PVOID m_ScriptVM;
+		void* m_NativesTable;
+		GetNativeHandler m_GetNativeHandler;
 	};
 
 	struct Pointers : PointerData

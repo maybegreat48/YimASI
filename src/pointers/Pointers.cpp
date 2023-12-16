@@ -48,6 +48,32 @@ namespace NewBase
 			m_GetPoolItem = ptr.As<PVOID>();
 		});
 
+		constexpr auto onProgramLoad = Pattern<"48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 33 FF 48 8B D9 40">("OnProgramLoad");
+		scanner.Add(onProgramLoad, [this](PointerCalculator ptr) {
+			m_OnProgramLoad = ptr.As<PVOID>();
+		});
+
+		constexpr auto resetThread = Pattern<"40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 48 8D 93 D4">("ResetThread");
+		scanner.Add(resetThread, [this](PointerCalculator ptr) {
+			m_ResetThread = ptr.As<PVOID>();
+		});
+
+		constexpr auto killThread = Pattern<"48 89 5C 24 08 57 48 83 EC 20 48 83 B9 18 01">("KillThread");
+		scanner.Add(killThread, [this](PointerCalculator ptr) {
+			m_KillThread = ptr.As<PVOID>();
+		});
+
+		constexpr auto scriptVM = Pattern<"48 8B C4 4C 89 40 18 48 89 50 10 48 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC B8">("ScriptVM");
+		scanner.Add(scriptVM, [this](PointerCalculator ptr) {
+			m_ScriptVM = ptr.As<PVOID>();
+		});
+
+		constexpr auto getNativeHandler = Pattern<"48 8D 0D ? ? ? ? 48 8B 14 FA">("GetNativeHandler");
+		scanner.Add(getNativeHandler, [this](PointerCalculator ptr) {
+			m_NativesTable = ptr.Add(3).Rip().As<void*>();
+			m_GetNativeHandler = ptr.Add(11).Rip().As<GetNativeHandler>();
+		});
+
 		if (!scanner.Scan())
 		{
 			LOG(FATAL) << "Some patterns could not be found, unloading.";
