@@ -1,6 +1,8 @@
 #include "Context.hpp"
 #include "Utils.hpp"
 
+#include <script/GtaThread.hpp>
+
 using namespace asmjit::x86;
 
 JIT::Context::Context(int stack_size) :
@@ -15,7 +17,6 @@ void JIT::Context::SetMain(main_t main)
 	MainFunction                                    = main;
 	VmRegisterState.GPR[4]                          = ((uint64_t)(StackMemory) + StackSize); // RSP
 	*(main_t*)((uint64_t)(StackMemory) + StackSize) = MainFunction;                 // return to main
-	// *reinterpret_cast<Context**>(&CallContext.m_data) = this;
 }
 
 void JIT::Context::SetThread(rage::scrThread* thread)
@@ -48,9 +49,32 @@ void JIT::Context::Call()
 	GetVMEnter()(this);
 }
 
+void JIT::Context::SetupForceCleanup()
+{
+	ForceCleanupRegisterState = VmRegisterState;
+	ForceCleanupSetup = false;
+	ForceCleanupActive = false;
+	ForceCleanupReturnAddress                                    = *reinterpret_cast<uint64_t*>(VmRegisterState.GPR[4]);
+	reinterpret_cast<GtaThread*>(Thread)->m_force_cleanup_cause  = 0;
+	reinterpret_cast<GtaThread*>(Thread)->m_force_cleanup_ip     = 0x1337;
+	reinterpret_cast<GtaThread*>(Thread)->m_force_cleanup_filter = ForceCleanupFlags;
+	LOG(INFO) << __FUNCTION__ ": setting up force cleanup for " << Thread->m_name << " with flags " << ForceCleanupFlags;
+}
+
 void JIT::Context::ForceCleanup()
 {
-	memcpy(&VmRegisterState, &ForceCleanupRegisterState, sizeof(RegisterState));
+	if (ForceCleanupRegisterState.GPR[4])
+	{
+		VmRegisterState = ForceCleanupRegisterState;
+		*reinterpret_cast<uint64_t*>(VmRegisterState.GPR[4]) = ForceCleanupReturnAddress;
+		ForceCleanupActive = true;
+		LOG(INFO) << __FUNCTION__ ": dispatching force cleanup for " << Thread->m_name << " with flags " << ForceCleanupFlags;
+	}
+}
+
+bool JIT::Context::NeedToSetupForceCleanup()
+{
+	return ForceCleanupSetup;
 }
 
 void JIT::Context::DebugRunScript()

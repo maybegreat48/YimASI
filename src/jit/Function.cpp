@@ -6,6 +6,8 @@
 #include "Context.hpp"
 #include "Natives.hpp"
 
+#include "pointers/Pointers.hpp"
+
 namespace
 {
 	using namespace asmjit::x86;
@@ -83,16 +85,18 @@ namespace
 	{
 		char buf[32]{};
 		const char* src = IntToString(buf, num);
-		strncpy(dst, src, len);
+		strncat(dst, src, len);
 	}
 
 	struct CallIndirectResult
 	{
 		void* Function;
-		int NumParams;
-		int NumReturns;
-		int ParamSize;
-		int ReturnSize;
+		uint64_t NumParams;
+		uint64_t NumReturns;
+		uint64_t ParamSize;
+		uint64_t ReturnSize;
+		uint64_t StableStack;
+		uint64_t FakeStack;
 	};
 
 	static CallIndirectResult s_Result{};
@@ -100,6 +104,7 @@ namespace
 	{
 		if (!index)
 		{
+			LOG(FATAL) << __FUNCTION__ ": index is null";
 			s_Result.Function = nullptr;
 			return &s_Result;
 		}
@@ -108,6 +113,7 @@ namespace
 
 		if (!func)
 		{
+			LOG(FATAL) << __FUNCTION__ ": cannot find function at " << index;
 			s_Result.Function = nullptr;
 			return &s_Result;
 		}
@@ -117,6 +123,7 @@ namespace
 		s_Result.ParamSize  = func->NumParams * 8;
 		s_Result.ReturnSize  = func->NumReturns * 8;
 		s_Result.Function   = ((uint8_t*)context->GetScriptFile()->GetMainFunction()) + context->GetScriptFile()->GetCode().labelOffsetFromBase(func->FunctionLabel); // TODO: see if this works
+		LOG(VERBOSE) << __FUNCTION__ ": resolved " << index << " to " << HEX(s_Result.Function);
 		return &s_Result;
 	}
 }
@@ -178,7 +185,7 @@ void JIT::Function::ProcessStackHills()
 int JIT::Function::GetStackPeak()
 {
 	if (CallIndirectUsed)
-		return HighestPeak + (File->HighestUnlinkedReturnCount * NumCallIndirects);
+		return HighestPeak + (10 * NumCallIndirects); // TODO: 10 is a random guess
 	else
 		return HighestPeak;
 }
@@ -189,13 +196,24 @@ int JIT::Function::GetStackPeak()
 asmjit::Operand JIT::Function::GetParameter(int index, int size)
 {
 	int paramStartLocation = (GetStackPeak() * 8) + (NumLocals * 8) + (NumReturns * 8) + 8;
-	return ptr(rsp, paramStartLocation + (index * 8), size);
+
+	if (File->CallIndirectUsed)
+		paramStartLocation += 8;
+
+	if (CallIndirectUsed)
+		return ptr(GetStableStackReg(), paramStartLocation + (index * 8), size);
+	else
+		return ptr(rsp, paramStartLocation + (index * 8), size);
 }
 
 asmjit::Operand JIT::Function::GetLocalFrame(int index, int size)
 {
 	int localStartLocation = (GetStackPeak() * 8);
-	return ptr(rsp, localStartLocation + (index * 8), size);
+
+	if (CallIndirectUsed)
+		return ptr(GetStableStackReg(), localStartLocation + (index * 8), size);
+	else
+		return ptr(rsp, localStartLocation + (index * 8), size);
 }
 
 asmjit::Operand JIT::Function::GetLocal(int index, int size)
@@ -211,7 +229,11 @@ asmjit::Operand JIT::Function::GetLocal(int index, int size)
 asmjit::Operand JIT::Function::GetReturn(int index, int size)
 {
 	int returnStartLocation = (GetStackPeak() * 8) + (NumLocals * 8) - 8; // uhhh
-	return ptr(rsp, returnStartLocation + (index * 8), size);
+
+	if (CallIndirectUsed)
+		return ptr(GetStableStackReg(), returnStartLocation + (index * 8), size);
+	else
+		return ptr(rsp, returnStartLocation + (index * 8), size);
 }
 
 void JIT::Function::SeekIP(int value)
@@ -376,8 +398,19 @@ void JIT::Function::Preprocess(Builder* a)
 		case Opcode::NATIVE: 
 		{
 			snapshot.InterruptHill = true;
-			int data = File->GetInsnOperand(GetFileIP(), 0);
-			stackOffset -= (((data >> 2) & 0x3F) - (data & 3));
+
+			uint16_t i0            = File->GetInsnOperand(GetFileIP(), 1);
+			uint8_t i1             = File->GetInsnOperand(GetFileIP(), 0);
+			uint8_t i2             = File->GetInsnOperand(GetFileIP(), 2);
+			int num_params         = (i1 >> 2) & 0x3F;
+			int num_returns        = i1 & 3;
+			auto entrypoint        = File->Program->m_native_entrypoints[(uint64_t)(i0 << 8) | (uint64_t)i2];
+
+			if (entrypoint == NETWORK_SET_RICH_PRESENCE)
+				Broken = true;
+
+			stackOffset -= (num_params - num_returns);
+
 			break;
 		}
 		case Opcode::LEAVE: 
@@ -483,10 +516,11 @@ void JIT::Function::Preprocess(Builder* a)
 		constantPushed = false;
 	}
 
-	if (stackOffset != 0 && !CallIndirectUsed)
+	if (stackOffset != 0 && !CallIndirectUsed && !Broken)
 		throw std::runtime_error("Stack isn't balanced");
 
-	ProcessStackHills();
+	if (!Broken)
+		ProcessStackHills();
 }
 
 void JIT::Function::Assemble(Builder* a)
@@ -498,11 +532,21 @@ void JIT::Function::Assemble(Builder* a)
 	a->commentf("LocalSize: %d", NumLocals * 8);
 	a->commentf("ReturnSize: %d", NumReturns * 8);
 
+	if (Broken)
+	{
+		a->comment("Broken function, skipping");
+		a->ret(); // broken functions shouldn't return anything
+		return;
+	}
+
 	CurrentInstructionPointer = 0;
 
 	// create storage space for locals
 	if (NumLocals + GetStackPeak() + NumReturns)
 		a->sub(rsp, (NumLocals + GetStackPeak() + NumReturns) * 8);
+
+	if (CallIndirectUsed)
+		Move(*a, GetStableStackReg(), rsp);
 
 	// TODO: this is very inefficient
 	for (int i = 0; i < NumLocals; i++)
@@ -534,12 +578,12 @@ void JIT::Function::Assemble(Builder* a)
 			for (int i = NumReturns; i > 0; i--)
 				Move(*a, GetReturn(i), PopFromStack());
 
+			if (CallIndirectUsed)
+				a->mov(rsp, GetStableStackReg()); // stabilize stack
+
 			// fix our frame when we leave
 			if (NumLocals + GetStackPeak() + NumReturns)
 				a->add(rsp, (NumLocals + GetStackPeak() + NumReturns) * 8);
-
-			if (CallIndirectUsed)
-				a->sub(rsp, GetStackExtensionReg()); // unextend stack
 
 			if (CodeStartOffset == 0) // main function
 			{
@@ -564,17 +608,17 @@ void JIT::Function::Assemble(Builder* a)
 				Move(*a, ptr(rsp, (function->NumParams * 8) - ((i + 1) * 8)), PopFromStack()); // TODO: i + 1?
 
 			if (File->CallIndirectUsed)
-				a->push(GetStackExtensionReg());
+				a->push(GetStableStackReg());
 			a->call(function->FunctionLabel);
 			if (File->CallIndirectUsed)
-				a->pop(GetStackExtensionReg());
+				a->pop(GetStableStackReg());
 
 			if (function->NumParams * 8)
 				a->add(rsp, function->NumParams * 8);
 
 			CurrentStackDepth -= function->NumParams;
 
-			int returnOffset = 0 - (function->NumParams * 8) - 8 - (int)((int)function->NumReturns * 8);
+			int returnOffset = 0 - (function->NumParams * 8) - ((int)File->CallIndirectUsed * 8) - 8 - (int)((int)function->NumReturns * 8);
 
 			for (int i = 0; i < function->NumReturns; i++)
 				Move(*a, PushToStack(), ptr(rsp, returnOffset + (i * 8)));
@@ -767,9 +811,9 @@ void JIT::Function::Assemble(Builder* a)
 		{
 			auto sval = PopFromStack(4);
 			if (sval.isMem())
-				a->movsx(GetTempReg(), sval.as<Mem>());
+				a->movsxd(GetTempReg(), sval.as<Mem>());
 			else
-				a->movsx(GetTempReg(), sval.as<Gp>());
+				a->movsxd(GetTempReg(), sval.as<Gp>());
 			a->shl(GetTempReg(), 3);
 			Add(*a, GetStackTop(), GetTempReg());
 			break;
@@ -982,7 +1026,7 @@ void JIT::Function::Assemble(Builder* a)
 
 			a->push(rax); CurrentStackDepth += 1; // store our context
 
-			auto v0 = GetStackItem(CurrentStackDepth - 1, 4);
+			auto v0 = GetStackItem(CurrentStackDepth - 2, 4);
 			v1      = GetStackTop(4); // refresh stack var
 
 			a->xor_(edx, edx);
@@ -1013,7 +1057,7 @@ void JIT::Function::Assemble(Builder* a)
 			a->push(rax);
 			CurrentStackDepth += 1; // store our context
 
-			auto v0 = GetStackItem(CurrentStackDepth - 1, 4);
+			auto v0 = GetStackItem(CurrentStackDepth - 2, 4);
 			v1      = GetStackTop(4); // refresh stack var
 
 			a->xor_(edx, edx);
@@ -1038,10 +1082,10 @@ void JIT::Function::Assemble(Builder* a)
 		case Opcode::INOT:
 		{
 			auto v0 = GetStackTop(4);
-			a->xor_(GetTempReg(), GetTempReg());
+			a->xor_(GetTempReg2(), GetTempReg2());
 			Compare(*a, v0, asmjit::Imm(0), 4);
-			a->setz(GetTempReg(1));
-			Move(*a, v0, GetTempReg(4));
+			a->setz(GetTempReg2(1));
+			Move(*a, v0, GetTempReg2(4));
 			break;
 		}
 		case Opcode::INEG:
@@ -1057,9 +1101,9 @@ void JIT::Function::Assemble(Builder* a)
 		{
 			auto v1 = PopFromStack(4);
 			auto v0 = PopFromStack(4);
-			a->xor_(GetTempReg(), GetTempReg());
-			Compare(*a, v0, v1);
+			Compare(*a, v0, v1, 4);
 			a->setz(GetTempReg(1));
+			a->movzx(GetTempReg(4), GetTempReg(1)); // clear top
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
 		}
@@ -1067,9 +1111,9 @@ void JIT::Function::Assemble(Builder* a)
 		{
 			auto v1 = PopFromStack(4);
 			auto v0 = PopFromStack(4);
-			a->xor_(GetTempReg(), GetTempReg());
-			Compare(*a, v0, v1);
+			Compare(*a, v0, v1, 4);
 			a->setnz(GetTempReg(1));
+			a->movzx(GetTempReg(4), GetTempReg(1)); // clear top
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
 		}
@@ -1077,9 +1121,9 @@ void JIT::Function::Assemble(Builder* a)
 		{
 			auto v1 = PopFromStack(4);
 			auto v0 = PopFromStack(4);
-			a->xor_(GetTempReg(), GetTempReg());
-			Compare(*a, v0, v1);
+			Compare(*a, v0, v1, 4);
 			a->setg(GetTempReg(1));
+			a->movzx(GetTempReg(4), GetTempReg(1)); // clear top
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
 		}
@@ -1087,9 +1131,9 @@ void JIT::Function::Assemble(Builder* a)
 		{
 			auto v1 = PopFromStack(4);
 			auto v0 = PopFromStack(4);
-			a->xor_(GetTempReg(), GetTempReg());
-			Compare(*a, v0, v1);
+			Compare(*a, v0, v1, 4);
 			a->setge(GetTempReg(1));
+			a->movzx(GetTempReg(4), GetTempReg(1)); // clear top
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
 		}
@@ -1097,9 +1141,9 @@ void JIT::Function::Assemble(Builder* a)
 		{
 			auto v1 = PopFromStack(4);
 			auto v0 = PopFromStack(4);
-			a->xor_(GetTempReg(), GetTempReg());
-			Compare(*a, v0, v1);
+			Compare(*a, v0, v1, 4);
 			a->setl(GetTempReg(1));
+			a->movzx(GetTempReg(4), GetTempReg(1)); // clear top
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
 		}
@@ -1107,8 +1151,8 @@ void JIT::Function::Assemble(Builder* a)
 		{
 			auto v1 = PopFromStack(4);
 			auto v0 = PopFromStack(4);
-			a->xor_(GetTempReg(), GetTempReg());
-			Compare(*a, v0, v1);
+			Compare(*a, v0, v1, 4);
+			a->movzx(GetTempReg(4), GetTempReg(1)); // clear top
 			a->setle(GetTempReg(1));
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
@@ -1168,7 +1212,7 @@ void JIT::Function::Assemble(Builder* a)
 		case Opcode::FADD:
 		{
 			auto v1 = PopFromStack(4);
-			auto v0 = GetStackTop();
+			auto v0 = GetStackTop(4);
 			Load(*a, xmm0, v0);
 			Load(*a, xmm1, v1);
 			a->addss(xmm0, xmm1);
@@ -1178,7 +1222,7 @@ void JIT::Function::Assemble(Builder* a)
 		case Opcode::FSUB:
 		{
 			auto v1 = PopFromStack(4);
-			auto v0 = GetStackTop();
+			auto v0 = GetStackTop(4);
 			Load(*a, xmm0, v0);
 			Load(*a, xmm1, v1);
 			a->subss(xmm0, xmm1);
@@ -1188,7 +1232,7 @@ void JIT::Function::Assemble(Builder* a)
 		case Opcode::FMUL:
 		{
 			auto v1 = PopFromStack(4);
-			auto v0 = GetStackTop();
+			auto v0 = GetStackTop(4);
 			Load(*a, xmm0, v0);
 			Load(*a, xmm1, v1);
 			a->mulss(xmm0, xmm1);
@@ -1198,7 +1242,7 @@ void JIT::Function::Assemble(Builder* a)
 		case Opcode::FDIV:
 		{
 			auto v1 = PopFromStack(4);
-			auto v0 = GetStackTop();
+			auto v0 = GetStackTop(4);
 			auto skip = a->newLabel();
 			Compare(*a, v1, asmjit::Imm(0));
 			a->jz(skip);
@@ -1212,7 +1256,7 @@ void JIT::Function::Assemble(Builder* a)
 		case Opcode::FMOD:
 		{
 			auto v1   = PopFromStack(4);
-			auto v0   = GetStackTop();
+			auto v0   = GetStackTop(4);
 			auto skip = a->newLabel();
 			Compare(*a, v1, asmjit::Imm(0));
 			a->jz(skip);
@@ -1245,7 +1289,7 @@ void JIT::Function::Assemble(Builder* a)
 			Load(*a, xmm0, v0);
 			Load(*a, xmm1, v1);
 			a->xor_(GetTempReg(), GetTempReg());
-			a->comiss(xmm0, xmm1);
+			a->ucomiss(xmm0, xmm1);
 			a->setz(GetTempReg(1));
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
@@ -1257,7 +1301,7 @@ void JIT::Function::Assemble(Builder* a)
 			Load(*a, xmm0, v0);
 			Load(*a, xmm1, v1);
 			a->xor_(GetTempReg(), GetTempReg());
-			a->comiss(xmm0, xmm1);
+			a->ucomiss(xmm0, xmm1);
 			a->setnz(GetTempReg(1));
 			Move(*a, PushToStack(), GetTempReg(4));
 			break;
@@ -1315,9 +1359,9 @@ void JIT::Function::Assemble(Builder* a)
 			auto z2 = PopFromStack(4);
 			auto y2 = PopFromStack(4);
 			auto x2 = PopFromStack(4);
-			auto z1 = GetStackItem(CurrentStackDepth, 4);
-			auto y1 = GetStackItem(CurrentStackDepth - 1, 4);
-			auto x1 = GetStackItem(CurrentStackDepth - 2, 4);
+			auto z1 = GetStackItem(CurrentStackDepth - 1, 4);
+			auto y1 = GetStackItem(CurrentStackDepth - 2, 4);
+			auto x1 = GetStackItem(CurrentStackDepth - 3, 4);
 
 			Load(*a, xmm0, x1);
 			Load(*a, xmm1, y1);
@@ -1341,9 +1385,9 @@ void JIT::Function::Assemble(Builder* a)
 			auto z2 = PopFromStack(4);
 			auto y2 = PopFromStack(4);
 			auto x2 = PopFromStack(4);
-			auto z1 = GetStackItem(CurrentStackDepth, 4);
-			auto y1 = GetStackItem(CurrentStackDepth - 1, 4);
-			auto x1 = GetStackItem(CurrentStackDepth - 2, 4);
+			auto z1 = GetStackItem(CurrentStackDepth - 1, 4);
+			auto y1 = GetStackItem(CurrentStackDepth - 2, 4);
+			auto x1 = GetStackItem(CurrentStackDepth - 3, 4);
 
 			Load(*a, xmm0, x1);
 			Load(*a, xmm1, y1);
@@ -1367,9 +1411,9 @@ void JIT::Function::Assemble(Builder* a)
 			auto z2 = PopFromStack(4);
 			auto y2 = PopFromStack(4);
 			auto x2 = PopFromStack(4);
-			auto z1 = GetStackItem(CurrentStackDepth, 4);
-			auto y1 = GetStackItem(CurrentStackDepth - 1, 4);
-			auto x1 = GetStackItem(CurrentStackDepth - 2, 4);
+			auto z1 = GetStackItem(CurrentStackDepth - 1, 4);
+			auto y1 = GetStackItem(CurrentStackDepth - 2, 4);
+			auto x1 = GetStackItem(CurrentStackDepth - 3, 4);
 
 			Load(*a, xmm0, x1);
 			Load(*a, xmm1, y1);
@@ -1393,9 +1437,9 @@ void JIT::Function::Assemble(Builder* a)
 			auto z2 = PopFromStack(4);
 			auto y2 = PopFromStack(4);
 			auto x2 = PopFromStack(4);
-			auto z1 = GetStackItem(CurrentStackDepth, 4);
-			auto y1 = GetStackItem(CurrentStackDepth - 1, 4);
-			auto x1 = GetStackItem(CurrentStackDepth - 2, 4);
+			auto z1    = GetStackItem(CurrentStackDepth - 1, 4);
+			auto y1    = GetStackItem(CurrentStackDepth - 2, 4);
+			auto x1    = GetStackItem(CurrentStackDepth - 3, 4);
 			auto skip1 = a->newLabel();
 			auto skip2 = a->newLabel();
 			auto skip3 = a->newLabel();
@@ -1428,9 +1472,9 @@ void JIT::Function::Assemble(Builder* a)
 		}
 		case Opcode::VNEG:
 		{
-			auto z = GetStackItem(CurrentStackDepth);
-			auto y = GetStackItem(CurrentStackDepth - 1);
-			auto x = GetStackItem(CurrentStackDepth - 2);
+			auto z = GetStackItem(CurrentStackDepth - 1);
+			auto y = GetStackItem(CurrentStackDepth - 2);
+			auto x = GetStackItem(CurrentStackDepth - 3);
 			Move(*a, GetTempReg(4), asmjit::Imm(0x80000000));
 			Xor(*a, x, GetTempReg(4));
 			Xor(*a, y, GetTempReg(4));
@@ -1445,6 +1489,7 @@ void JIT::Function::Assemble(Builder* a)
 			int num_params = (i1 >> 2) & 0x3F;
 			int num_returns = i1 & 3;
 			auto entrypoint  = File->Program->m_native_entrypoints[(uint64_t)(i0 << 8) | (uint64_t)i2];
+			bool mapped_refs = NeedToFixVecRefrs(entrypoint);
 
 			if (entrypoint == TERMINATE_THIS_THREAD)
 			{
@@ -1453,27 +1498,38 @@ void JIT::Function::Assemble(Builder* a)
 			}
 			else if (entrypoint == WAIT)
 			{
-				Move(*a, ptr(JIT::GetContextReg(), offsetof(Context, Context::SleepMsecs), 4), PopFromStack(4));
-				Move(*a, ptr(JIT::GetContextReg(), offsetof(Context, Context::SleepQueued), 1), asmjit::Imm(1));
+				Move(*a, ptr(JIT::GetContextReg(), offsetof(Context, Context::SleepMsecs), 4), PopFromStack(4), 4);
+				Move(*a, ptr(JIT::GetContextReg(), offsetof(Context, Context::SleepQueued), 1), asmjit::Imm(1), 1);
 				a->call(Context::GetVMExit());
+				break;
+			}
+			else if (entrypoint == HAS_FORCE_CLEANUP_OCCURRED)
+			{
+				Move(*a, ptr(JIT::GetContextReg(), offsetof(Context, Context::ForceCleanupFlags), 4), PopFromStack(4), 4);
+				Move(*a, ptr(JIT::GetContextReg(), offsetof(Context, Context::ForceCleanupSetup), 1), asmjit::Imm(1), 1);
+				a->call(Context::GetVMExit());
+				Xor(*a, GetTempReg2(), GetTempReg2());
+				Move(*a, GetTempReg2(1), ptr(JIT::GetContextReg(), offsetof(Context, Context::ForceCleanupActive), 1));
+				Move(*a, PushToStack(4), GetTempReg2(4));
 				break;
 			}
 
 			if (UsingRegisters())
 				throw std::runtime_error("Shouldn't use registers here");
 
-			// TODO
 			CurrentStackDepth -= num_params;
+			if (mapped_refs)
+				Move(*a, ptr(GetContextReg(), offsetof(Context, Context::CallContext) + offsetof(rage::scrNativeCallContext, rage::scrNativeCallContext::m_data_count), 4), asmjit::Imm(0));
 			a->lea(GetTempReg2(), GetStackItem(CurrentStackDepth).as<Mem>()); // should now point to the argument list
 			Move(*a, ptr(GetContextReg(), offsetof(Context, Context::CallContext) + offsetof(rage::scrNativeCallContext, rage::scrNativeCallContext::m_arg_count), 4), asmjit::Imm(num_params));
 			Move(*a, ptr(GetContextReg(), offsetof(Context, Context::CallContext) + offsetof(rage::scrNativeCallContext, rage::scrNativeCallContext::m_args), 8), GetTempReg2());
 			if (num_returns)
 				Move(*a, ptr(GetContextReg(), offsetof(Context, Context::CallContext) + offsetof(rage::scrNativeCallContext, rage::scrNativeCallContext::m_return_value), 8), GetTempReg2());
 			else
-				Move(*a, ptr(GetContextReg(), offsetof(Context, Context::CallContext) + offsetof(rage::scrNativeCallContext, rage::scrNativeCallContext::m_return_value), 8), asmjit::Imm(0)); // TODO: do we need to do this?
+				Move(*a, ptr(GetContextReg(), offsetof(Context, Context::CallContext) + offsetof(rage::scrNativeCallContext, rage::scrNativeCallContext::m_return_value), 8), asmjit::Imm(0));
 
 			if (File->CallIndirectUsed)
-				a->push(GetStackExtensionReg());
+				a->push(GetStableStackReg());
 
 			a->push(rax); // save the VM context
 			a->lea(rcx, ptr(GetContextReg(), offsetof(Context, Context::CallContext)));
@@ -1487,8 +1543,16 @@ void JIT::Function::Assemble(Builder* a)
 
 			a->pop(rax);
 
+			if (mapped_refs)
+			{
+				a->push(rax);
+				a->lea(rcx, ptr(GetContextReg(), offsetof(Context, Context::CallContext)));
+				CallDebug(*a, asmjit::Imm(NewBase::Pointers.m_FixVectors)); // don't have to worry about alignment here
+				a->pop(rax);
+			}
+
 			if (File->CallIndirectUsed)
-				a->pop(GetStackExtensionReg());
+				a->pop(GetStableStackReg());
 
 			CurrentStackDepth += num_returns;
 
@@ -1717,15 +1781,20 @@ void JIT::Function::Assemble(Builder* a)
 			auto returnLoop    = a->newLabel();
 			auto skipReturnLoop = a->newLabel();
 
+			// #1: Resolve the function address
+
+			Move(*a, rcx, rax); // context
+			Move(*a, rdx, loc); // index
+
 			a->push(rax); // prevent registers from being clobbered
 			a->push(r8);
 
 			CurrentStackDepth += 2;
 
-			Move(*a, rcx, rax); // context
-			Move(*a, rdx, loc); // index
-
+			a->mov(rbp, rsp);
+			a->and_(rsp, 0xFFFFFFFFFFFFFFF0); // TODO: remove this after debug
 			CallDebug(*a, asmjit::Imm(CALLINDIRECT));
+			a->mov(rsp, rbp);
 
 			a->xchg(GetTempReg3(), rax); // store return value
 
@@ -1734,67 +1803,86 @@ void JIT::Function::Assemble(Builder* a)
 			a->pop(r8);
 			a->pop(rax);
 
-			a->xchg(GetTempReg3(), rax); // restore
+			a->cmp(ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::Function), 8), asmjit::Imm(0));
+			a->jz(skip); // cannot resolve function - SKIP
 
-			a->cmp(ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::Function), 8), asmjit::Imm(0));
-			a->jz(skip);
+			// #2: Setup parameters
 
-			Sub(*a, rsp, ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4));
+			Sub(*a, rsp, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4)); // a->sub(rsp, function->NumParams * 8);
 
-			if (CurrentStackDepth)
-				a->lea(GetTempReg2(), ptr(rsp, CurrentStackDepth * 8));
+			if (CurrentStackDepth - 1) // apparently lea rsp, [rsp] doesn't encode
+				a->lea(GetTempReg2(), ptr(rsp, (CurrentStackDepth - 1) * 8));
 			else
-				Move(*a, GetTempReg2(), rsp);
+				Move(*a, GetTempReg2(), rsp); // TempReg2 = virtual stack (RSP[CurrentStackDepth - 1])
 
-			Sub(*a, GetTempReg2(), ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4));
+			Add(*a, GetTempReg2(), ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4)); // CurrentStackDepth += function->NumParams;
 
-			Move(*a, r10, ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4)); // i = numParams * 8;
-			Compare(*a, r10, asmjit::Imm(0));
+			Move(*a, r10d, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4), 4); // i = numParams * 8;
+			Sub(*a, r10d, asmjit::Imm(8), 4); // i -= 8;
 
+			// ----- while (i != -8) {
+			Compare(*a, r10d, asmjit::Imm(-8), 4);
 			a->jz(skipParamLoop);
 			a->bind(paramLoop);
 
-			Move(*a, ptr(rsp, r10), ptr(GetTempReg2()));
+			Move(*a, ptr(rsp, r10d), ptr(GetTempReg2()));
 
-			Sub(*a, GetTempReg2(), asmjit::Imm(8)); // CurrentStackDepth--;
-			Sub(*a, r10, asmjit::Imm(8)); // i--;
+			Sub(*a, GetTempReg2(), asmjit::Imm(8)); // CurrentStackDepth--; (PopFromStack)
+			Sub(*a, r10d, asmjit::Imm(8)); // i--;
 
-			Compare(*a, r10, asmjit::Imm(0));
+			Compare(*a, r10d, asmjit::Imm(-8), 4);
 			a->jnz(paramLoop);
 			a->bind(skipParamLoop);
+			// ----- }
 
-			a->push(rax); // store the helper result
-			a->push(GetTempReg2()); // store the stack ptr
-			a->push(GetStackExtensionReg()); // store this too
-			a->call(ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::Function)));
-			a->pop(GetStackExtensionReg());
-			a->pop(GetTempReg2());
-			a->pop(rax);
+			// #3: Call the function
+			// TODO: what happens if an indirect function calls another indirect function?
+			
+			// store data
+			Move(*a, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::StableStack)), GetStableStackReg());
+			Move(*a, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::FakeStack)), GetTempReg2());
+			a->push(GetTempReg3()); // store the helper result
+			a->call(ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::Function)));
+			a->pop(GetTempReg3());
+			Move(*a, GetStableStackReg(), ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::StableStack)));
+			Move(*a, GetTempReg2(), ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::FakeStack)));
 
-			Add(*a, GetTempReg2(), ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4));
-			Add(*a, rsp, ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4));
+			// #4: Setup return values
 
-			Move(*a, r10d, ptr(offsetof(CallIndirectResult, CallIndirectResult::ReturnSize), 4));
-			Add(*a, r10d, asmjit::Imm(8));
-			a->neg(r10d);
+			Add(*a, rsp, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ParamSize))); // a->add(rsp, function->NumParams * 8);
+			Sub(*a, GetTempReg2(), ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ParamSize))); // CurrentStackDepth -= function->NumParams;
 
-			Compare(*a, r10d, asmjit::Imm(-8));
+			Move(*a, r10d, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4), 4); // returnOffset = (function->NumParams * 8);
+			Add(*a, r10d, asmjit::Imm(8 + 8)); // returnOffset += 8 (TempReg3); returnOffset += 8 (ReturnAddress);
+			Add(*a, r10d, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ReturnSize), 4), 4); // returnOffset += (int)((int)function->NumReturns * 8);
+			a->neg(r10d); // returnOffset = -returnOffset;
+			a->movsxd(r10, r10d);
 
+			Move(*a, r11d, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::NumReturns), 4)); // i = function->NumReturns;
+
+			// ----- while (i != 0) {
+			Compare(*a, r11d, asmjit::Imm(0), 4);
 			a->jz(skipReturnLoop);
 			a->bind(returnLoop);
 
 			Add(*a, GetTempReg2(), asmjit::Imm(8)); // CurrentStackDepth++;
-			Move(*a, ptr(GetTempReg2()), ptr(rsp, r10d));
+			Move(*a, ptr(GetTempReg2()), ptr(rsp, r10));
+			Add(*a, r10, asmjit::Imm(8)); // returnOffset += 8;
+			Sub(*a, r11d, asmjit::Imm(1), 4); // i--;
 
-			Add(*a, r10d, asmjit::Imm(8)); // i++;
+			Compare(*a, r11d, asmjit::Imm(0), 4);
 			a->jnz(returnLoop);
 			a->bind(skipReturnLoop);
+			// ----- }
 
-			// the stack fix
-			Sub(*a, rsp, ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4));
-			Add(*a, rsp, ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ReturnSize), 4));
-			Add(*a, GetStackExtensionReg(), ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4));
-			Sub(*a, GetStackExtensionReg(), ptr(rax, offsetof(CallIndirectResult, CallIndirectResult::ReturnSize), 4));
+			// #5: Fix stack
+
+			CurrentStackDepth += 1;
+			Sub(*a, rsp, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ParamSize), 4)); // pop parameters
+			Sub(*a, rsp, asmjit::Imm(8)); // pop function pointer
+			Add(*a, rsp, ptr(GetTempReg3(), offsetof(CallIndirectResult, CallIndirectResult::ReturnSize), 4)); // push returns
+
+			// #6: Whew
 
 			a->bind(skip);
 

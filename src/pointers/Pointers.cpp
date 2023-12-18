@@ -71,7 +71,12 @@ namespace NewBase
 		constexpr auto getNativeHandler = Pattern<"48 8D 0D ? ? ? ? 48 8B 14 FA">("GetNativeHandler");
 		scanner.Add(getNativeHandler, [this](PointerCalculator ptr) {
 			m_NativesTable = ptr.Add(3).Rip().As<void*>();
-			m_GetNativeHandler = ptr.Add(11).Rip().As<GetNativeHandler>();
+			m_GetNativeHandler = ptr.Add(12).Rip().As<GetNativeHandler>();
+		});
+
+		constexpr auto fixVectors = Pattern<"83 79 18 00 48 8B D1 74 4A">("FixVectors");
+		scanner.Add(fixVectors, [this](PointerCalculator ptr) {
+			m_FixVectors = ptr.As<PVOID>();
 		});
 
 		if (!scanner.Scan())

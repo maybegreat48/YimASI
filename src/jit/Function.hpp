@@ -91,5 +91,6 @@ namespace JIT
 		int NumLocals{};
 		int NumReturns{};
 		int Xrefs{};
+		bool Broken{};
 	};
 }

@@ -194,12 +194,16 @@ JIT::main_t JIT::ScriptFile::GetMainFunction()
 	{
 		Builder->finalize();
 
+#if 0
 		asmjit::String sb;
 		asmjit::FormatOptions formatOptions{};
 
 		asmjit::Formatter::formatNodeList(sb, formatOptions, Builder.get());
+#endif
+
 		g_JIT.add(&MainFunction, &Code);
 
+#if 0
 		std::ofstream file("file.bin", std::ios::binary);
 		file.write((const char*)MainFunction, Code.codeSize());
 		file.close();
@@ -207,6 +211,7 @@ JIT::main_t JIT::ScriptFile::GetMainFunction()
 		std::ofstream assm("file.asm");
 		assm.write(sb.data(), sb.size());
 		assm.close();
+#endif
 	}
 
 	return MainFunction;

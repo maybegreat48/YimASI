@@ -2,14 +2,9 @@
 #include <d3d11.h>
 #include <windows.h>
 
-namespace rage
-{
-	class scrNativeHandler;
-}
-
 namespace NewBase
 {
-	using GetNativeHandler = rage::scrNativeHandler*(*)(void* table, std::uint64_t hash);
+	using GetNativeHandler = void*(*)(void* table, std::uint64_t hash);
 
 	struct PointerData
 	{
@@ -28,6 +23,8 @@ namespace NewBase
 		PVOID m_ScriptVM;
 		void* m_NativesTable;
 		GetNativeHandler m_GetNativeHandler;
+
+		PVOID m_FixVectors;
 	};
 
 	struct Pointers : PointerData

@@ -31,6 +31,7 @@ namespace JIT
 		RegisterState VmRegisterState{};
 		RegisterState CallerRegisterState{};
 		RegisterState ForceCleanupRegisterState{};
+		uint64_t ForceCleanupReturnAddress{};
 		void* Globals{};
 		void* Statics{};
 		ScriptFile* File{};
@@ -39,8 +40,9 @@ namespace JIT
 		rage::scrThread* Thread{};
 		void* StackMemory{};
 		int StackSize{};
-		bool NeedToSetupForceCleanup{};
-		bool ForceCleanupSetupDone{};
+		bool ForceCleanupSetup{};
+		int ForceCleanupFlags{};
+		bool ForceCleanupActive{};
 		bool KillThread{};
 		rage::scrNativeCallContext CallContext{};
 
@@ -57,7 +59,9 @@ namespace JIT
 		ScriptFile* GetScriptFile();
 
 		void Call();
+		void SetupForceCleanup();
 		void ForceCleanup();
+		bool NeedToSetupForceCleanup();
 		void DebugRunScript();
 
 		bool IsKilled();

@@ -34,7 +34,7 @@ JIT::Gp JIT::GetTempReg3(int size)
 	return GetRegOfSize(Gp::Id::kIdR9, size);
 }
 
-JIT::Gp JIT::GetStackExtensionReg(int size)
+JIT::Gp JIT::GetStableStackReg(int size)
 {
 	return GetRegOfSize(Gp::Id::kIdR8, size);
 }

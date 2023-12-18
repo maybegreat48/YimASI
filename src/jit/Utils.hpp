@@ -12,7 +12,7 @@ namespace JIT
 	/// Only safe when the stack is unstable
 	/// </summary>
 	Gp GetTempReg3(int size = 8);
-	Gp GetStackExtensionReg(int size = 8);
+	Gp GetStableStackReg(int size = 8);
 
 	#define DEFINE_INSN_TYPE(name, func)                                                 \
 	inline void name(Builder& a, const asmjit::Operand& dst, const asmjit::Operand& src, int size = 8) \
