@@ -24,7 +24,6 @@ namespace JIT
 	using thrkill_t = void (*)();
 
 	// runtime context that is always stored in RAX
-
 #pragma pack(push, 0x10)
 	class Context
 	{
@@ -44,7 +43,7 @@ namespace JIT
 		int ForceCleanupFlags{};
 		bool ForceCleanupActive{};
 		bool KillThread{};
-		rage::scrNativeCallContext CallContext{};
+		alignas (0x10) rage::scrNativeCallContext CallContext{};
 
 		main_t MainFunction{};
 		

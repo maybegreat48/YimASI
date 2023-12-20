@@ -94,6 +94,14 @@ namespace
 	};
 
 	static std::unordered_set<rage::scrNativeHandler> s_OutVectorNativeHandlers{};
+
+	static const std::unordered_set<rage::scrNativeHash> s_ProgramCounterNatives = {
+		0xA9575F812C6A7997,
+		0xBF737600CDDBEADD,
+		0x60FE567DF1B1AF9D
+	};
+
+	static std::unordered_set<rage::scrNativeHandler> s_ProgramCounterNativeHandlers{};
 }
 
 void JIT::FillNatives(rage::scrProgram* program, std::vector<uint64_t>& natives)
@@ -133,4 +141,18 @@ bool JIT::NeedToFixVecRefrs(rage::scrNativeHandler handler)
 	}
 
 	return s_OutVectorNativeHandlers.contains(handler);
+}
+
+bool JIT::NeedToSetProgramCounter(rage::scrNativeHandler handler)
+{
+	if (s_ProgramCounterNativeHandlers.empty())
+	{
+		for (auto element : s_ProgramCounterNatives)
+		{
+			s_ProgramCounterNativeHandlers.insert(
+			    (rage::scrNativeHandler)NewBase::Pointers.m_GetNativeHandler(NewBase::Pointers.m_NativesTable, NewBase::GetTranslatedHash(element)));
+		}
+	}
+
+	return s_ProgramCounterNativeHandlers.contains(handler);
 }

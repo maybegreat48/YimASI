@@ -17,4 +17,6 @@ namespace JIT
 	void PatchNatives(rage::scrProgram* program, uint64_t* native_hashes);
 
 	bool NeedToFixVecRefrs(rage::scrNativeHandler handler);
+
+	bool NeedToSetProgramCounter(rage::scrNativeHandler handler);
 }

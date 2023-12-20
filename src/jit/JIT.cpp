@@ -20,8 +20,9 @@ void JIT::JIT::RegisterProgramImpl(rage::scrProgram* program, uint64_t* native_h
 	LOG(VERBOSE) << __FUNCTION__ ": " << HEX(program->m_name_hash) << ", " << program->m_name;
 
 	// debug
-	if (program->m_name_hash != NewBase::Joaat("main"))
+	if (program->m_name_hash != NewBase::Joaat("freemode"))
 		return;
+	 
 
 	if (!IsProgramRegistered(program))
 	{
@@ -43,7 +44,7 @@ void JIT::JIT::RegisterThreadImpl(rage::scrThread* thread)
 {
 	if (!IsThreadRegistered(thread) && ScriptFromHash(thread->m_context.m_script_hash))
 	{
-		LOG(VERBOSE) << __FUNCTION__;
+		LOG(VERBOSE) << __FUNCTION__ ": " << thread->m_name;
 
 		auto context = std::make_unique<Context>();
 		context->SetThread(thread);

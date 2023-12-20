@@ -8,6 +8,8 @@
 
 #include "pointers/Pointers.hpp"
 
+#include <script/scrThread.hpp>
+
 namespace
 {
 	using namespace asmjit::x86;
@@ -122,7 +124,7 @@ namespace
 		s_Result.NumReturns = func->NumReturns;
 		s_Result.ParamSize  = func->NumParams * 8;
 		s_Result.ReturnSize  = func->NumReturns * 8;
-		s_Result.Function   = ((uint8_t*)context->GetScriptFile()->GetMainFunction()) + context->GetScriptFile()->GetCode().labelOffsetFromBase(func->FunctionLabel); // TODO: see if this works
+		s_Result.Function   = ((uint8_t*)context->GetScriptFile()->GetMainFunction()) + context->GetScriptFile()->GetCode().labelOffsetFromBase(func->FunctionLabel); 
 		LOG(VERBOSE) << __FUNCTION__ ": resolved " << index << " to " << HEX(s_Result.Function);
 		return &s_Result;
 	}
@@ -315,7 +317,9 @@ JIT::Function::Function(ScriptFile* file, int begin, int end, int params, int lo
 	ASMJIT_ASSERT(locals >= 0 && locals <= 5000);
 	ASMJIT_ASSERT(returns >= 0 && returns <= 2000);
 
+#if 0
 	LOG(VERBOSE) << __FUNCTION__ << ": [" << CodeStartOffset << ", " << CodeEndOffset << "]: params=" << NumParams << " locals=" << NumLocals << " returns=" << NumReturns;
+#endif
 }
 
 void JIT::Function::Preprocess(Builder* a)
@@ -1512,6 +1516,13 @@ void JIT::Function::Assemble(Builder* a)
 				Move(*a, GetTempReg2(1), ptr(JIT::GetContextReg(), offsetof(Context, Context::ForceCleanupActive), 1));
 				Move(*a, PushToStack(4), GetTempReg2(4));
 				break;
+			}
+
+			if (NeedToSetProgramCounter(entrypoint))
+			{
+				// the PC value doesn't matter as long as it is unique
+				Move(*a, GetTempReg2(), ptr(JIT::GetContextReg(), offsetof(Context, Context::Thread)));
+				Move(*a, ptr(GetTempReg2(), offsetof(rage::scrThread, rage::scrThread::m_context) + offsetof(rage::scrThreadContext, rage::scrThreadContext::m_instruction_pointer), 4), asmjit::Imm(GetFileIP() + 3));
 			}
 
 			if (UsingRegisters())
