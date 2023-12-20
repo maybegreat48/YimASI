@@ -101,6 +101,6 @@ void JIT::JIT::ScriptTickImpl(rage::scrProgram* program, rage::scrThread* thread
 	else if (ctx->IsYielding())
 	{
 		thread->m_context.m_state = rage::eThreadState::running;
-		thread->m_context.m_timer_c = ctx->GetYieldTimer();
+		thread->m_context.m_wait_timer = ctx->GetYieldTimer();
 	}
 }
