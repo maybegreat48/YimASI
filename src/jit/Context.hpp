@@ -71,10 +71,6 @@ namespace JIT
 		static vmexit_t GetVMExit();
 		static thrkill_t GetThreadKill();
 
-		static size_t GetSize(int num_natives);
-
-		static Context& GetFromCallCtx(rage::scrNativeCallContext* ctx);
-
 		~Context();
 
 		friend class Function;

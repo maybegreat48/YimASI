@@ -196,16 +196,6 @@ JIT::thrkill_t JIT::Context::GetThreadKill()
 	return ThreadKill;
 }
 
-size_t JIT::Context::GetSize(int num_natives)
-{
-	return (sizeof(Context) - sizeof(void*)) + (num_natives * sizeof(void*));
-}
-
-JIT::Context& JIT::Context::GetFromCallCtx(rage::scrNativeCallContext* ctx)
-{
-	return **reinterpret_cast<Context**>(&ctx->m_data);
-}
-
 JIT::Context::~Context()
 {
 	delete[] StackMemory;
